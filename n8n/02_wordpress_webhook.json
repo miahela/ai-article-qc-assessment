@@ -1,0 +1,58 @@
+{
+  "name": "Wordpress Webhook",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wordpress-upload",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "cd80bd86-2388-4346-92e0-dc11049f0025",
+      "name": "Webhook",
+      "webhookId": "dd1d0662-206e-4042-bfed-45c7a83c557e"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Here would go the code for triggering an upload to the wordpress page."
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "e7be95f2-aa62-42e3-a0d7-57dcea508833",
+      "name": "Code"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "3f5df481-e96e-4ee3-b73a-03a4aab1db10",
+  "meta": {
+    "instanceId": "3e254cc0451099a30021cb709297a00542f2dccbd24f8f848d100a23e6113dd5"
+  },
+  "id": "zy5OBeJDHeUNXvzm",
+  "tags": []
+}

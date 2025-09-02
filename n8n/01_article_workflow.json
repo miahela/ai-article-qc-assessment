@@ -1,0 +1,393 @@
+{
+  "name": "Article Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        80
+      ],
+      "id": "7eedfd3e-310a-48e7-a199-f9a02eaf1be2",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "https://docs.google.com/document/d/1syYirDYpa8B4SoT3ITYeknDvQmdIeuFq5QW7WmbEVVc/export?format=html",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -352,
+        80
+      ],
+      "id": "bacd2210-30b8-43fa-bf18-aa5f9a8a52e5",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c6b7dd60-4211-4552-af1b-42dd16c919c3",
+              "name": "rawArticleHtml",
+              "value": "={{ $json.data }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -144,
+        80
+      ],
+      "id": "235d1739-68c7-419a-9e6c-cf936c21a9f0",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const html = item.json.rawArticleHtml;\n\n  const decodeHtmlEntities = (text) => {\n    if (typeof text !== 'string') return text;\n    return text.replace(/&amp;/g, '&')\n               .replace(/&lt;/g, '<')\n               .replace(/&gt;/g, '>')\n               .replace(/&quot;/g, '\"')\n               .replace(/&#39;/g, \"'\")\n               .replace(/&nbsp;/g, ' ')\n               .replace(/&ndash;/g, '–')\n               .replace(/&lsquo;/g, \"'\")\n               .replace(/&rsquo;/g, \"'\")\n               .replace(/&ldquo;/g, '\"')\n               .replace(/&rdquo;/g, '\"')\n               .replace(/ldquo;/g, '')\n               .replace(/rdquo;/g, '');\n  };\n\n  const getActualUrl = (redirectUrl) => {\n    const match = redirectUrl.match(/url\\?q=([^&]+)/);\n    return match ? decodeURIComponent(match[1]) : redirectUrl;\n  };\n\n  const metaTitleRegex = /<p[^>]*><span[^>]*>Meta Title:<\\/span><span[^>]*>([\\s\\S]*?)<\\/span><\\/p>/i;\n  const metaTitleMatch = html.match(metaTitleRegex);\n  const metaTitle = metaTitleMatch ? decodeHtmlEntities(metaTitleMatch[1].trim()) : '';\n\n  const metaDescriptionRegex = /<p[^>]*><span[^>]*>Meta Description:<\\/span><span[^>]*>([\\s\\S]*?)<\\/span><\\/p>/i;\n  const metaDescriptionMatch = html.match(metaDescriptionRegex);\n  const metaDescription = metaDescriptionMatch ? decodeHtmlEntities(metaDescriptionMatch[1].trim()) : '';\n\n  const articleTitleMatch = html.match(/<h1[^>]*><span[^>]*>([\\s\\S]*?)<\\/span><\\/h1>/i);\n  const articleTitle = articleTitleMatch ? decodeHtmlEntities(articleTitleMatch[1].trim()) : '';\n\n  const images = [];\n  const regularLinks = [];\n  const imageParagraphsToRemove = [];\n\n  const imagePatternRegex = /(<p[^>]*>[\\s\\S]*?<a[^>]*href=\"[^\"]*drive\\.google\\.com\\/file\\/d\\/[^\"]*\"[^>]*>IMAGE\\s+\\d+<\\/a>[\\s\\S]*?Alt tag:\\s*[&\"\"]([^&\"\"]*)[&\"\"][\\s\\S]*?<\\/p>)/gi;\n  let imageMatch;\n\n  while ((imageMatch = imagePatternRegex.exec(html)) !== null) {\n    const fullParagraph = imageMatch[1];\n    const altText = imageMatch[2];\n    \n    const urlMatch = fullParagraph.match(/href=\"([^\"]*drive\\.google\\.com\\/file\\/d\\/[^\"]*)\"[^>]*>IMAGE\\s+(\\d+)/i);\n    \n    if (urlMatch) {\n      const fullUrl = urlMatch[1];\n      const actualUrl = getActualUrl(fullUrl);\n      const imageNumber = urlMatch[2];\n      \n      images.push({\n        url: actualUrl,\n        alt: decodeHtmlEntities(altText),\n        textAnchor: `IMAGE ${imageNumber}`\n      });\n      \n      imageParagraphsToRemove.push(fullParagraph);\n    }\n  }\n\n\n  const aTagRegex = /<a[^>]*href=\"([^\"]*)\"[^>]*>([\\s\\S]*?)<\\/a>/g;\n  let aMatch;\n\n  while ((aMatch = aTagRegex.exec(html)) !== null) {\n    const fullHref = aMatch[1];\n    const linkText = decodeHtmlEntities(aMatch[2].trim());\n    const actualUrl = getActualUrl(fullHref);\n    \n    const isImageLink = linkText.match(/^IMAGE\\s+\\d+$/i) && actualUrl.includes('drive.google.com/file/d/');\n    \n    if (!isImageLink && actualUrl && linkText !== '') {\n      regularLinks.push({\n        url: actualUrl,\n        text: linkText\n      });\n    }\n  }\n\n  const imageCount = images.length;\n  const linkCount = regularLinks.length;\n\n  const qualityChecks = {\n    images: {\n      count: imageCount,\n      isValid: imageCount >= 2 && imageCount <= 8,\n      issues: []\n    },\n    links: {\n      count: linkCount,\n      isValid: linkCount >= 3 && linkCount <= 15,\n      issues: []\n    },\n    googleDriveHosting: {\n      count: 0,\n      isValid: true,\n      issues: []\n    }\n  };\n\n  if (imageCount < 2) {\n    qualityChecks.images.issues.push(`Too few images: ${imageCount} (minimum 2 required)`);\n  } else if (imageCount > 8) {\n    qualityChecks.images.issues.push(`Too many images: ${imageCount} (maximum 8 recommended)`);\n  }\n\n  if (linkCount < 3) {\n    qualityChecks.links.issues.push(`Too few links: ${linkCount} (minimum 3 required)`);\n  } else if (linkCount > 15) {\n    qualityChecks.links.issues.push(`Too many links: ${linkCount} (maximum 15 recommended)`);\n  }\n\n  let googleDriveImageCount = 0;\n  images.forEach((img, index) => {\n    if (img.url.includes('drive.google.com/file/d/')) {\n      googleDriveImageCount++;\n    } else {\n      qualityChecks.googleDriveHosting.issues.push(`Image ${index + 1} not hosted on Google Drive: ${img.url}`);\n    }\n  });\n\n  qualityChecks.googleDriveHosting.count = googleDriveImageCount;\n  qualityChecks.googleDriveHosting.isValid = googleDriveImageCount === imageCount;\n\n  images.forEach((img, index) => {\n    if (!img.alt || img.alt.trim() === '') {\n      qualityChecks.images.issues.push(`Image ${index + 1} missing alt text`);\n    }\n  });\n\n  const totalIssues = qualityChecks.images.issues.length + \n                     qualityChecks.links.issues.length + \n                     qualityChecks.googleDriveHosting.issues.length;\n  \n  const qualityScore = totalIssues === 0 ? 'PASS' : \n                      totalIssues <= 2 ? 'WARNING' : 'FAIL';\n\n  let cleanedArticleHtml = html;\n\n  cleanedArticleHtml = cleanedArticleHtml.replace(metaTitleRegex, '');\n  cleanedArticleHtml = cleanedArticleHtml.replace(metaDescriptionRegex, '');\n  \n  cleanedArticleHtml = cleanedArticleHtml.replace(/<p[^>]*><span[^>]*><\\/span><\\/p>/gi, '');\n\n  imageParagraphsToRemove.forEach(pToRemove => {\n    cleanedArticleHtml = cleanedArticleHtml.replace(pToRemove, '');\n  });\n\n  const bodyContentMatch = cleanedArticleHtml.match(/<body[^>]*>([\\s\\S]*?)<\\/body>/i);\n  let articleHtmlContent = bodyContentMatch ? bodyContentMatch[1].trim() : cleanedArticleHtml.trim();\n\n  return {\n    json: {\n      wordpress: {\n        metaTitle: metaTitle,\n        metaDescription: metaDescription,\n        articleTitle: articleTitle,\n        articleHtml: articleHtmlContent\n      },\n      \n      qualityChecks: qualityChecks,\n      qualityScore: qualityScore,\n      \n      content: {\n        metaTitle: metaTitle,\n        metaDescription: metaDescription,\n        articleTitle: articleTitle,\n        articleHtmlContent: articleHtmlContent,\n        images: images,\n        imageCount: imageCount,\n        links: regularLinks,\n        linkCount: linkCount\n      }\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        256,
+        64
+      ],
+      "id": "59cceb2d-7a06-48b4-a303-f8cb5478cf3d",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "appPJFQscfuHzbEc4",
+          "mode": "list",
+          "cachedResultName": "Article Quality Control",
+          "cachedResultUrl": "https://airtable.com/appPJFQscfuHzbEc4"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblRv1IOde2DdlFWs",
+          "mode": "list",
+          "cachedResultName": "Articles",
+          "cachedResultUrl": "https://airtable.com/appPJFQscfuHzbEc4/tblRv1IOde2DdlFWs"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Ready for WordPress": "={{$json.qualityScore === 'PASS'}}",
+            "Image Count": "={{ $json.qualityChecks.images.count }}",
+            "Link Count": "={{ $json.qualityChecks.links.count }}",
+            "Article Title": "={{ $json.wordpress.articleTitle }}",
+            "Meta Title": "={{ $json.wordpress.metaTitle }}",
+            "Meta Description": "={{ $json.wordpress.metaDescription }}",
+            "Quality Score": "={{ $json.qualityScore }}",
+            "Issues": "={{$json.qualityChecks.images.issues.concat($json.qualityChecks.links.issues, $json.qualityChecks.googleDriveHosting.issues).join('; ')}}",
+            "WordPress Upload Status": "Pending",
+            "Processing Date": "2025-08-29T00:00:00"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Article Title",
+              "displayName": "Article Title",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Meta Title",
+              "displayName": "Meta Title",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Meta Description",
+              "displayName": "Meta Description",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Quality Score",
+              "displayName": "Quality Score",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "PASS",
+                  "value": "PASS"
+                },
+                {
+                  "name": "WARNING",
+                  "value": "WARNING"
+                },
+                {
+                  "name": "FAIL",
+                  "value": "FAIL"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Image Count",
+              "displayName": "Image Count",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Link Count",
+              "displayName": "Link Count",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Issues",
+              "displayName": "Issues",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Ready for WordPress",
+              "displayName": "Ready for WordPress",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Processing Date",
+              "displayName": "Processing Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "WordPress Upload Status",
+              "displayName": "WordPress Upload Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Pending",
+                  "value": "Pending"
+                },
+                {
+                  "name": "Uploaded",
+                  "value": "Uploaded"
+                },
+                {
+                  "name": "Failed",
+                  "value": "Failed"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Total Elements",
+              "displayName": "Total Elements",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Meta Title Length",
+              "displayName": "Meta Title Length",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Meta Description Length",
+              "displayName": "Meta Description Length",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Has Issues",
+              "displayName": "Has Issues",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Days Since Processing",
+              "displayName": "Days Since Processing",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "SEO Improvement Suggestions",
+              "displayName": "SEO Improvement Suggestions",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Content Quality Feedback",
+              "displayName": "Content Quality Feedback",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        464,
+        64
+      ],
+      "id": "6121fee6-381f-4503-81c2-ccbe6382921b",
+      "name": "Create a record",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "TH4zxoFJk8P311A0",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Create a record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "0eed970b-d9e0-48f7-9022-dbbcbcc6411b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3e254cc0451099a30021cb709297a00542f2dccbd24f8f848d100a23e6113dd5"
+  },
+  "id": "Ka0hailmmfE3SbFw",
+  "tags": []
+}
